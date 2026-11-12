@@ -1,0 +1,79 @@
+---
+name: Pull request catch-up
+description: >-
+  Merges the base branch into each open, same-repository pull request that is behind it
+  and does not conflict.
+author: michen00
+branding:
+  icon: git-merge
+  color: green
+
+inputs:
+  token:
+    description: >-
+      A GitHub App installation token with Contents write, minted in the calling job.
+      When it is set, the merges are made as the App, and GitHub holds none of the runs
+      they cause. A merge refused to the App with HTTP 401, 403, or 404 is retried with
+      github-token.
+    required: false
+    default: ''
+  github-token:
+    description: >-
+      Lists the pull requests, reads whether they conflict, makes the merges when token
+      is empty or refused, and approves the runs those merges cause. It needs actions
+      write, contents write, and pull-requests read.
+    required: false
+    default: ${{ github.token }}
+  base:
+    description: The branch merged into the open pull requests that target it.
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+  commit-message:
+    description: >-
+      The merge commit message. {base}, {number}, and {branch} are replaced by the base
+      branch, the pull request number, and the pull request's head branch.
+    required: false
+    default: 'chore: merge {base} into #{number}'
+  exclude-labels:
+    description: >-
+      Comma- or newline-separated label names. A pull request carrying any of them is
+      skipped. Names are compared case-insensitively.
+    required: false
+    default: ''
+
+outputs:
+  updated:
+    description: Space-separated numbers of the pull requests this run merged the base into.
+    value: ${{ steps.catch-up.outputs.updated }}
+
+runs:
+  using: composite
+  steps:
+    - name: Merge the base into pull requests behind it
+      id: catch-up
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        APP_TOKEN: ${{ inputs.token }}
+        REPO: ${{ github.repository }}
+        BASE: ${{ inputs.base }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+        EXCLUDE_LABELS: ${{ inputs.exclude-labels }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/catch-up.sh"
+
+    # Only merges made with github-token cause runs that GitHub holds for approval.
+    - name: Approve the runs those merges caused
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/approve-caused-runs.sh"
+
+    # A refused merge fails the run, whichever identity attempted it.
+    - name: Fail on refused merges and on runs still held, unverified, or missing
+      shell: bash
+      env:
+        REPO: ${{ github.repository }}
+        BASE: ${{ inputs.base }}
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/report.sh"
