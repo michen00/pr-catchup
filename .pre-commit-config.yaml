@@ -108,6 +108,15 @@ repos:
         # Otherwise actionlint runs whatever shellcheck and pyflakes are first on PATH.
         args: [-shellcheck=, -pyflakes=]
 
+  # static type analysis
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.97
+    hooks:
+      - id: ty
+        # The hook syncs uv.lock into the project environment and checks against it;
+        # --locked stops its own uv from rewriting a stale lock.
+        args: ['--all-groups', '--locked']
+
   # configuration validation
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: 0.39.0
