@@ -82,7 +82,16 @@ Merges made as an App cause no held runs, so nothing waits for approval. To set 
 1. Create a GitHub App under your account or organization: Settings, then Developer settings, then GitHub Apps, then New GitHub App. Under Repository permissions, set Contents to Read and write and leave the rest at No access. Under Webhook, clear Active.
 2. Install the App on the repositories that run the catch-up.
 3. On the App's settings page, copy the Client ID and generate a private key.
-4. In each repository, create an environment named `pr-catchup` that only the default branch can deploy to, and store both in it. In the web interface, that is Settings, then Environments, then New environment, with Deployment branches and tags set to Selected branches and tags and one rule naming the default branch. With `gh`, for a default branch named `main`:
+4. In each repository, store both for Actions:
+
+   ```sh
+   gh variable set APP_CLIENT_ID --repo OWNER/REPO --body '<client id>'
+   gh secret set APP_PRIVATE_KEY --repo OWNER/REPO < path/to/private-key.pem
+   ```
+
+   The catch-up runs on pushes to the base and on dispatch, never on a Dependabot pull request, so the key does not need to be in the Dependabot secret store. A run that Dependabot triggers reads only that store, and it runs the pull request's own copy of the workflow.
+
+   A repository secret reaches a workflow pushed on any branch, so anyone with write access can read the key. That grants nothing new when the App is installed only on this repository with Contents write, which they can already write to. When the App is installed on more than one repository, or when some people with write access should not hold the key, keep both in an environment that only the default branch can deploy to, and add `environment: pr-catchup` to the job: an environment secret reaches only jobs that name the environment and run from a branch it admits. With `gh`, for a default branch named `main`:
 
    ```sh
    gh api --method PUT repos/OWNER/REPO/environments/pr-catchup \
@@ -94,7 +103,7 @@ Merges made as an App cause no held runs, so nothing waits for approval. To set 
    gh secret set APP_PRIVATE_KEY --env pr-catchup --repo OWNER/REPO < path/to/private-key.pem
    ```
 
-   The private key can mint a token for every repository the App is installed on. A secret stored in the repository or the organization reaches a workflow run on any branch, and anyone with write access can push a branch whose workflow reads it; an environment secret reaches only jobs that name the environment and run from a branch it admits. On GitHub Free, environment secrets and deployment branch rules are available only in public repositories ([GitHub documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)). Where they are unavailable, store both in the repository without `--env` and remove `environment:` from the workflow, knowing that a workflow on any branch can then read the key.
+   On GitHub Free, environment secrets and deployment branch rules are available only in public repositories ([GitHub documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
 
 Then use this workflow, saved as `.github/workflows/pr-catchup.yml`:
 
@@ -120,7 +129,6 @@ jobs:
       || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: pr-catchup # holds the App's client ID and private key
     permissions:
       actions: write # approve runs when a merge falls back to github-token
       contents: write # create the merge commits when it falls back
@@ -152,7 +160,6 @@ Pin `actions/create-github-app-token` the same way, to a release you have review
 - **`concurrency` with `cancel-in-progress: false`.** A canceled run could stop after a merge and before it approves the runs that merge caused, leaving them held with no failure reported. With one group and no cancellation, a push during a run queues one more run; GitHub keeps only the newest pending run, which is enough because each run reads the current base.
 - **`timeout-minutes: 15`.** Bounds a run that hangs. The approval step polls for up to about a minute for each pull request merged with `github-token`, so raise the limit if many pull requests are updated at once without an App.
 - **The job `if:`.** A dispatched run uses the workflow file from the ref it was dispatched from. The condition admits a dispatch only from the default branch, so a manual run uses the same workflow file as a push. It is not a security boundary: someone with write access can edit a branch's copy of the workflow and drop it.
-- **`environment: pr-catchup`.** Gives the App key only to a job that names the environment and runs from a branch the environment admits, which the setup above limits to the default branch. That keeps the key from a workflow pushed on any other branch, which a repository or organization secret would reach.
 - **`if:` and `continue-on-error: true` on the token step.** The workflow works before the App is set up, and a failed mint falls back to `github-token` instead of failing the job.
 
 ## How a run works
@@ -278,7 +285,7 @@ The inputs reach the scripts only through environment variables, never as `${{ }
 
 ### The App key stays out of the action
 
-The action takes an installation token, not the App's private key. The token, scoped by `permission-contents: write`, expires after one hour and is revoked when the job ends. The key can mint a token for every repository the App is installed on, so keep it in an environment that only the default branch can deploy to, as the [recommended workflow](#recommended-workflow-with-a-github-app-token) does. A repository or organization secret reaches a workflow pushed on any branch, and neither the job `if:` nor anything else in the workflow file stops a branch's own copy of the workflow from reading it.
+The action takes an installation token, not the App's private key. The token, scoped by `permission-contents: write`, expires after one hour and is revoked when the job ends. The key can mint a token for every repository the App is installed on, and a repository or organization secret reaches a workflow pushed on any branch; neither the job `if:` nor anything else in the workflow file stops a branch's own copy of the workflow from reading it. When the key grants more than write access to this one repository, keep it in an environment, as step 4 of the [App setup](#recommended-workflow-with-a-github-app-token) describes.
 
 ### Pin a commit SHA
 
