@@ -1,0 +1,126 @@
+---
+ci:
+  autofix_commit_msg: |
+    chore: autofix via pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autoupdate_commit_msg: |
+    chore: autoupdate pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  # Dependabot bumps hooks; quarterly is as close to off as pre-commit.ci allows.
+  autoupdate_schedule: quarterly
+
+default_install_hook_types:
+  - commit-msg
+  - pre-commit
+
+default_stages: [pre-commit]
+
+repos:
+  # security (fail fast)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        # The hook's own entry scans only staged changes, which a CI checkout has none of.
+        entry: gitleaks dir --redact --verbose
+        fail_fast: true
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+        fail_fast: true
+
+  # commit messages
+  - repo: https://github.com/jorisroovers/gitlint
+    rev: v0.19.1
+    hooks:
+      - id: gitlint
+        stages: [commit-msg]
+
+  # hygiene (cheap, non-formatting)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # formatting before linting
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+        args: [--fix, --show-fixes]
+      - id: ruff-format
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.14.1-1
+    hooks:
+      - id: shfmt
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.50.0
+    hooks:
+      - id: markdownlint
+        args: [--fix]
+
+  # linting
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-ast
+      - id: check-toml
+      - id: check-yaml
+      - id: debug-statements
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [--strict]
+  - repo: https://github.com/adhtruong/mirrors-typos
+    rev: v1.52.2
+    hooks:
+      - id: typos
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1-1
+    hooks:
+      - id: shellcheck
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        # Otherwise actionlint runs whatever shellcheck and pyflakes are first on PATH.
+        args: [-shellcheck=, -pyflakes=]
+
+  # static type analysis
+  - repo: https://github.com/astral-sh/ty-pre-commit
+    rev: v0.0.97
+    hooks:
+      - id: ty
+        # The hook syncs uv.lock into the project environment and checks against it;
+        # --locked stops its own uv from rewriting a stale lock.
+        args: ['--all-groups', '--locked']
+
+  # configuration validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.39.0
+    hooks:
+      - id: check-dependabot
+      - id: check-github-actions
+      - id: check-github-workflows

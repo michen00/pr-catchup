@@ -1,0 +1,3 @@
+# The scripts source each other by paths relative to their own directory.
+external-sources=true
+source-path=SCRIPTDIR
