@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.coverage
+.coverage.*
+.pytest_cache/
+.ruff_cache/
+.venv/
+htmlcov/
+
+# Operating systems and editors
+.DS_Store
+.idea/
+*.swp

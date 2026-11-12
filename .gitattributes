@@ -1,0 +1,24 @@
+# Text with LF endings: every file git detects as text, including types not listed below.
+* text=auto eol=lf
+
+# Text with LF endings: each type the repository carries.
+.codespellrc    text eol=lf
+.editorconfig   text eol=lf
+.gitattributes  text eol=lf
+.gitignore      text eol=lf
+.gitlint        text eol=lf
+.python-version text eol=lf
+.shellcheckrc   text eol=lf
+.yamllint       text eol=lf
+CODEOWNERS      text eol=lf
+LICENSE         text eol=lf
+*.lock          text eol=lf
+*.md            text eol=lf diff=markdown
+*.py            text eol=lf diff=python
+*.sh            text eol=lf diff=bash
+*.toml          text eol=lf
+*.yaml          text eol=lf
+*.yml           text eol=lf
+
+# Generated files: uv writes the lock file.
+uv.lock         linguist-generated=true
