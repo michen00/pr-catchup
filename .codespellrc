@@ -1,0 +1,5 @@
+[codespell]
+# en-GB_to_en-US reports British spellings; typos treats them as correct.
+builtin = clear,rare,usage,en-GB_to_en-US
+check-hidden = true
+skip = .gitignore,*.lock

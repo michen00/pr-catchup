@@ -1,0 +1,46 @@
+# target-version is unset, so Ruff reads requires-python from pyproject.toml.
+line-length = 88
+indent-width = 4
+
+[lint]
+select = ['ALL']
+ignore = [
+  'COM812',  # missing-trailing-comma
+  'CPY001',  # missing-copyright-notice
+  'ERA001',  # commented-out-code
+  'PLR2004',  # magic-value-comparison
+  'TD002',  # missing-todo-author
+  'TD003',  # missing-todo-link
+]
+# DOC201 and DOC501 are preview rules; explicit-preview-rules keeps ALL from adding
+# the rest of preview.
+preview = true
+explicit-preview-rules = true
+extend-select = ['D401', 'DOC201', 'DOC501']
+
+[lint.flake8-quotes]
+inline-quotes = 'single'
+
+[lint.per-file-ignores]
+# The tests run the scripts under bash against a stub gh first on PATH, with stub
+# tokens.
+'tests/**/*.py' = [
+  'D100',  # undocumented-public-module
+  'D401',  # non-imperative-mood
+  'S101',  # assert
+  'S106',  # hardcoded-password-func-arg
+  'S603',  # subprocess-without-shell-equals-true
+  'S607',  # start-process-with-partial-path
+]
+
+[lint.pydoclint]
+ignore-one-line-docstrings = true
+
+[lint.pydocstyle]
+convention = 'google'
+
+[format]
+quote-style = 'single'
+indent-style = 'space'
+line-ending = 'lf'
+docstring-code-format = true

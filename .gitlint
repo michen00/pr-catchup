@@ -1,0 +1,13 @@
+[general]
+contrib=contrib-title-conventional-commits
+ignore=body-is-missing,body-min-length
+
+[title-max-length]
+line-length=50
+
+# contrib-title-conventional-commits alone accepts a capitalized subject.
+[title-match-regex]
+regex=^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?!?: [a-z].*\S$
+
+[body-max-line-length]
+line-length=72
