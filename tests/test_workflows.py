@@ -114,14 +114,13 @@ def test_the_app_token_asks_only_for_what_the_merge_needs(name: str) -> None:
 
 
 @pytest.mark.parametrize('name', _APP_CALLERS)
-def test_the_app_key_comes_from_an_environment(name: str) -> None:
-    """The job that reads the App key names the environment that holds it.
+def test_the_app_key_comes_from_the_actions_secret_store(name: str) -> None:
+    """The job reads the App key as an Actions secret and names no environment.
 
-    A repository or organization secret reaches a workflow pushed on any branch;
-    an environment secret reaches only jobs that name the environment and run
-    from a branch it admits.
+    The README's App setup says when to move the key into an environment; the
+    examples, and this repository, use a per-repository App without one.
     """
-    assert _job(name)['environment'] == 'pr-catchup'
+    assert 'environment' not in _job(name)
     assert _app_token_step(name)['with']['private-key'] == (
         '${{ secrets.APP_PRIVATE_KEY }}'
     )
