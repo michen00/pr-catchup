@@ -1,0 +1,56 @@
+---
+name: Pull request catch-up
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pr-catchup
+  cancel-in-progress: false
+
+jobs:
+  catch-up:
+    name: Catch up pull requests
+    # A dispatched run loads this file from the dispatched ref; push events come only
+    # from the default branch, and this holds a dispatch to the same rule.
+    if: >-
+      github.event_name != 'workflow_dispatch'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Environment secrets reach only jobs that name the environment.
+    environment: pr-catchup
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Check out the action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Missing or invalid App credentials leave the github-token path available.
+      - name: Mint an App token, if one is configured
+        id: app-token
+        if: vars.APP_CLIENT_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Catch up pull requests
+        uses: ./
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          # Dependabot rebases over an added commit only if its message says so.
+          commit-message: |-
+            chore: merge {base} into #{number}
+
+            [dependabot skip]
