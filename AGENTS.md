@@ -7,8 +7,9 @@ This repository is a public composite GitHub Action. `action.yml` runs three bas
 - `action.yml`: inputs, the `updated` output, and three steps. Inputs reach the scripts only through `env:`.
 - `scripts/catch-up.sh`, `scripts/approve-caused-runs.sh`, and `scripts/report.sh`: the three steps, in order.
 - `scripts/approve-bot-gated-runs.sh` and `scripts/render-message.sh`: libraries the step scripts source; they are not executable.
-- `tests/`: pytest tests that run the scripts under bash against a stub `gh` and a recording `sleep`, first on `PATH`.
+- `tests/`: pytest tests that run the scripts under bash against a stub `gh` and a recording `sleep`, first on `PATH`. `tests/test_bot_automerge.py` also runs the provenance step of `bot-automerge.yml` against throwaway git repositories.
 - `.github/workflows/ci.yml`: pre-commit and pytest. `.github/workflows/pr-catchup.yml` runs this action on this repository with `uses: ./`.
+- `.github/workflows/bot-automerge.yml`: approves eligible Dependabot pull requests and arms auto-merge on them. `.github/workflows/bot-automerge-disarm.yml` turns auto-merge off when a pull request is labeled `do not auto-merge`.
 
 ## Commands
 
