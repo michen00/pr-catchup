@@ -4,8 +4,8 @@ name: Bot auto-merge
 # Approves eligible Dependabot pull requests and arms squash auto-merge on them.
 # Auto-merge waits for required checks, so nothing here polls them.
 #
-# Only events that bring commits trigger it, since a label change or a reopen has no
-# pusher to check. Re-arming after either takes a push, such as `@dependabot rebase`.
+# Only events that bring commits trigger it, so re-arming after a label change or a
+# reopen takes a push, such as `@dependabot rebase`.
 
 on:
   pull_request:
@@ -94,26 +94,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
-          EVENT_ACTION: ${{ github.event.action }}
-          SENDER: ${{ github.event.sender.login }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.event.after }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           # An author login comes from an email anyone can set, so the head is trusted
           # only when GitHub created every commit, and:
           # - a non-merge commit is by the pull request's author;
           # - a merge is a clean merge of two parents or an admin's, since GitHub also
           #   signs a conflict resolved by hand;
-          # - on a push by anyone but the author or an admin, every commit it added is a
-          #   clean merge of two parents, since GitHub also signs whatever an App or
-          #   `GITHUB_TOKEN` creates through its API.
-          # Every check reads the one head commit that a trusted verdict names in `head`.
+          # - every commit that anyone but the author or an admin pushed, in any push
+          #   since the branch was created, is a clean merge of two parents, since
+          #   GitHub also signs whatever an App or `GITHUB_TOKEN` creates through its API.
+          # Every check reads the one head commit that a trusted verdict names in `head`,
+          # which must be the head this run's event brought.
           # Fails closed: a failed query or fetch leaves `trusted` unset.
           set -euo pipefail
           head=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
           if ! [[ "$head" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
             echo "::error::could not read the PR's head commit; holding."
             exit 1
+          fi
+          if [ "$head" != "$EVENT_HEAD" ]; then
+            echo "::warning::the head is no longer the one this event brought; holding."
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+            exit 0
           fi
           jq_rows='.[] | [
             (if (.commit.verification.verified == true)
@@ -200,28 +204,80 @@ jobs:
               rejected=$((rejected + 1))
             fi
           done <<< "$rows"
-          # An `opened` run has no pusher, only the commits Dependabot opened with.
-          if [ "$EVENT_ACTION" = synchronize ] && [ "$SENDER" != "$AUTHOR" ] &&
-             ! admin "$SENDER"; then
-            if ! [[ "$BEFORE" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
-               ! [[ "$AFTER" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
-               ! git merge-base --is-ancestor "$BEFORE" "$AFTER" 2>/dev/null; then
-              # A rewrite cannot be checked against what it replaced.
-              echo "::warning::${SENDER} rewrote the branch; holding."
-              rejected=$((rejected + 1))
-            else
-              # `^HEAD` leaves out the default branch's commits, which a catch-up brings in
-              # but did not write. Assigned, so a failed listing fails the step.
-              pushed=$(git rev-list --parents "$AFTER" "^${BEFORE}" '^HEAD')
-              while read -r sha parents; do
-                [ -z "$sha" ] && continue
-                if ! mechanical "$sha" "$parents"; then
-                  echo "::warning::${SENDER} pushed ${sha}, which is not a clean merge of" \
-                       "two parents; holding."
-                  rejected=$((rejected + 1))
-                fi
-              done <<< "$pushed"
+          # Every push since the branch was last created, newest first, as GitHub
+          # records it. A held push's commits stay in the branch, so the push that
+          # started this run cannot vouch for the branch alone.
+          for attempt in 1 2 3; do
+            pushes=$(gh api -X GET "repos/${GH_REPO}/activity" -f ref="refs/heads/${HEAD_REF}" \
+              -f direction=desc -F per_page=100 --paginate \
+              --jq '.[] | [.activity_type, (.actor.login // "<none>"), .before, .after]
+                | join("|")')
+            newest=${pushes%%$'\n'*}
+            [ "${newest##*|}" = "$head" ] && break
+            if [ "$attempt" -lt 3 ]; then
+              sleep 5
             fi
+          done
+          if [ "${newest##*|}" != "$head" ]; then
+            echo "::warning::the branch's push history does not reach its head; holding."
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Assigned, so a failed listing fails the step. `^HEAD` leaves out the default
+          # branch's commits, which a catch-up brings in but did not write.
+          in_branch=$(git rev-list "$head" '^HEAD')
+          end=''
+          expected=$head
+          while IFS='|' read -r change pusher before after; do
+            [ -z "$change" ] && continue
+            # Each record must end where the next newer one began, or a change is missing.
+            if [ "$after" != "$expected" ]; then
+              echo "::warning::the branch's push history skips a change; holding."
+              rejected=$((rejected + 1))
+              end=gap
+              break
+            fi
+            expected=$before
+            if [ "$pusher" != "$AUTHOR" ] && ! admin "$pusher"; then
+              case $change in
+                push | force_push) range=("$after" "^${before}") ;;
+                branch_creation) range=("$after") ;;
+                *) range=() ;;
+              esac
+              if [ "${#range[@]}" -eq 0 ]; then
+                echo "::warning::${pusher} changed the branch by ${change}; holding."
+                rejected=$((rejected + 1))
+              else
+                for commit in "${range[@]}"; do
+                  commit=${commit#^}
+                  if ! [[ "$commit" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+                    echo "::error::the push history names no commit; holding."
+                    exit 1
+                  fi
+                  git cat-file -e "${commit}^{commit}" 2>/dev/null ||
+                    git fetch -q --no-tags origin "$commit"
+                done
+                added=$(git rev-list --parents "${range[@]}" '^HEAD')
+                while read -r sha parents; do
+                  [ -z "$sha" ] && continue
+                  grep -qxF "$sha" <<< "$in_branch" || continue
+                  if ! mechanical "$sha" "$parents"; then
+                    echo "::warning::${pusher} pushed ${sha}, which is not a clean merge" \
+                         "of two parents; holding."
+                    rejected=$((rejected + 1))
+                  fi
+                done <<< "$added"
+              fi
+            fi
+            if [ "$change" = branch_creation ]; then
+              end=creation
+              break
+            fi
+          done <<< "$pushes"
+          if [ -z "$end" ]; then
+            echo "::warning::the branch's push history does not reach its creation;" \
+                 "holding."
+            rejected=$((rejected + 1))
           fi
           if [ "$rejected" -ne 0 ]; then
             echo "trusted=false" >>"$GITHUB_OUTPUT"
