@@ -182,3 +182,38 @@ def test_the_reader_rejects_other_flow_forms(text: str) -> None:
     """Any other flow form raises rather than being read wrongly."""
     with pytest.raises(ValueError, match='unsupported'):
         load_yaml(text)
+
+
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('a: >\n  one\n  two\n', 'one two\n'),
+        ('a: >\n  one\n\n  two\n', 'one\ntwo\n'),
+        ('a: >\n  one\n    two\n  three\n', 'one\n  two\nthree\n'),
+        ('a: >\n  one\n\n    two\n\n  three\n', 'one\n\n  two\n\nthree\n'),
+        ('a: >\n  one\n  \ttwo\n', 'one\n\ttwo\n'),
+        ('a: >\n\n  one\n', '\none\n'),
+        ('a: >-\n  one\n    two\n', 'one\n  two'),
+    ],
+    ids=[
+        'lines-join',
+        'blank-line-breaks',
+        'more-indented-keeps-breaks',
+        'blank-lines-around-more-indented',
+        'tab-indented',
+        'leading-blank-line',
+        'strip-chomping',
+    ],
+)
+def test_the_reader_folds_block_scalars_as_yaml_does(text: str, expected: str) -> None:
+    """A folded block scalar reads as YAML 1.2 folds it."""
+    assert load_yaml(text) == {'a': expected}
+
+
+@pytest.mark.parametrize(
+    'text', ['a: |\n  one\n     \n  two\n', 'a: >\n  one\n  \t\n  two\n']
+)
+def test_the_reader_rejects_whitespace_content_lines(text: str) -> None:
+    """A whitespace-only line past the indentation raises rather than reading blank."""
+    with pytest.raises(ValueError, match='whitespace-only'):
+        load_yaml(text)
