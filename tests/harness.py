@@ -5,7 +5,6 @@ inputs in the environment, and with the state directory, the fake's records, and
 GITHUB_OUTPUT all under the test's tmp_path.
 """
 
-import itertools
 import json
 import os
 import re
@@ -378,15 +377,29 @@ def _strip_comment(text: str) -> str:
 
 
 def _fold(lines: list[str]) -> str:
-    """Join a folded block scalar's lines: a break is a space, a blank line a break."""
-    text = lines[0] if lines else ''
-    for previous, line in itertools.pairwise(lines):
+    """Join a folded block scalar's lines as YAML does.
+
+    Returns:
+        The lines joined: a break between two lines of text is a space, and each blank
+        line between them a break. Breaks next to a more-indented line, one that
+        starts with whitespace, are kept.
+    """
+    text = ''
+    previous = None
+    blanks = 0
+    for line in lines:
         if not line:
-            text += '\n'
-        elif not previous:
-            text += line
+            blanks += 1
+            continue
+        if previous is None:
+            text += '\n' * blanks
+        elif previous[0] in ' \t' or line[0] in ' \t':
+            text += '\n' * (blanks + 1)
         else:
-            text += ' ' + line
+            text += '\n' * blanks if blanks else ' '
+        text += line
+        previous = line
+        blanks = 0
     return text
 
 
@@ -473,11 +486,13 @@ class _YamlReader:
 
     def block_scalar(self, style: str, chomping: str, indent: int) -> str:
         body: list[str] = []
+        blank_lines: list[int] = []
         body_indent = None
         while self.index < len(self.lines):
             line = self.lines[self.index]
             if not line.strip():
                 body.append('')
+                blank_lines.append(self.index)
                 self.index += 1
                 continue
             found = len(line) - len(line.lstrip(' '))
@@ -490,6 +505,12 @@ class _YamlReader:
                 raise ValueError(msg)
             body.append(line[body_indent:])
             self.index += 1
+        for index in blank_lines:
+            # Past the indentation, or holding a tab, a blank-looking line is content.
+            line = self.lines[index]
+            if body_indent is not None and ('\t' in line or len(line) > body_indent):
+                msg = f'unsupported whitespace-only line at line {index + 1}'
+                raise ValueError(msg)
         trailing = 0
         while body and not body[-1]:
             body.pop()
