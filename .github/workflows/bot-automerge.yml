@@ -1,15 +1,11 @@
 ---
 name: Bot auto-merge
 
-# Approves eligible Dependabot pull requests and arms native auto-merge (squash) on them.
+# Approves eligible Dependabot pull requests and arms squash auto-merge on them.
+# Auto-merge waits for required checks, so nothing here polls them.
 #
-# No check polling: `gh pr checks --required --watch` fails when it runs before CI has
-# registered its checks, and auto-merge waits for required checks anyway.
-#
-# Runs only on the events that bring commits. A label change or a reopen carries no
-# pusher, so a run on one could not apply the pusher rule, and would vouch for a head
-# that the rule held on its push. To re-arm after removing `do not auto-merge` or
-# reopening, comment `@dependabot rebase`: Dependabot pushes, and that push is checked.
+# Only events that bring commits trigger it, since a label change or a reopen has no
+# pusher to check. Re-arming after either takes a push, such as `@dependabot rebase`.
 
 on:
   pull_request:
@@ -25,8 +21,7 @@ concurrency:
 
 jobs:
   bot-automerge:
-    # The guard reads `pull_request.user.login`, not `github.actor`: the actor is whoever
-    # caused this event, so a later push by anyone else would skip the job.
+    # The author, not `github.actor`: a catch-up push makes its pusher the actor.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -36,14 +31,9 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-    # Pinned to commits, which Dependabot moves: these steps receive the App's key and
-    # write tokens.
     steps:
-      # Optional App identity for arming: auto-merge completes as whoever armed it, and a
-      # merge under `GITHUB_TOKEN` starts no workflows, so nothing the push to main
-      # triggers would run.
-      # Dependabot-triggered runs read only the Dependabot secret store, so the key must be
-      # in both stores.
+      # Auto-merge completes as whoever armed it, and a merge as `GITHUB_TOKEN` triggers
+      # no workflows, hence the App. Dependabot's runs read only Dependabot secrets.
       - name: Detect App credentials
         id: creds
         env:
@@ -70,7 +60,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # `continue-on-error` records a failed mint as a success, so report it here.
+      # `continue-on-error` hides a failed mint.
       - name: Report a mint that failed
         if: >-
           steps.creds.outputs.available == 'true' &&
@@ -90,8 +80,8 @@ jobs:
         run: |
           echo "::notice::No update-type for ${ECOSYSTEM:-unknown}; leaving this for a human."
 
-      # The default branch, never the pull request's head, so nothing from the pull
-      # request runs. The next step fetches its commits as objects for `git merge-tree`.
+      # Never the head, so nothing from the pull request runs. The next step fetches the
+      # head's commits as objects only.
       - name: Check out the default branch's history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -109,25 +99,16 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
         run: |
-          # The author login alone proves nothing: it is resolved from the author email,
-          # which any pusher can set. So every commit must also be created by GitHub, and
-          # every commit that is not a merge must be authored by the pull request's author.
-          #
-          # A merge GitHub signs can still carry anything if someone resolved it by hand
-          # in the conflict editor. So a merge must also be a clean merge of two parents,
-          # as Update branch and catch-up merges are, or be authored by a repository admin.
-          #
-          # GitHub also signs commits that an App or `GITHUB_TOKEN` creates through its API,
-          # with any author, tree and parents, so the rules above alone trust any holder of
-          # a write token. The pusher is what GitHub records itself: on a push by anyone
-          # but the pull request's author or an admin, every commit that push added must be
-          # a clean merge of two parents, which is all a catch-up push contains.
-          #
-          # Everything here is checked against the one head commit read first, and a
-          # trusted verdict names it in `head`, so the approval and the arming below act on
-          # that commit and no later push.
-          #
-          # Fails closed: a failed query or fetch leaves `trusted` unset; later steps skip.
+          # An author login comes from an email anyone can set, so the head is trusted
+          # only when GitHub created every commit, and:
+          # - a non-merge commit is by the pull request's author;
+          # - a merge is a clean merge of two parents or an admin's, since GitHub also
+          #   signs a conflict resolved by hand;
+          # - on a push by anyone but the author or an admin, every commit it added is a
+          #   clean merge of two parents, since GitHub also signs whatever an App or
+          #   `GITHUB_TOKEN` creates through its API.
+          # Every check reads the one head commit that a trusted verdict names in `head`.
+          # Fails closed: a failed query or fetch leaves `trusted` unset.
           set -euo pipefail
           head=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
           if ! [[ "$head" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
@@ -146,10 +127,9 @@ jobs:
             .sha,
             ([.parents[].sha] | join(" "))
           ] | join("|")'
-          # The endpoint returns at most 250 commits and still exits 0, so refuse rather
-          # than inspect part of the pull request.
+          # The commits endpoint stops at 250 without an error.
           total=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.commits')
-          # A non-integer count makes the tests below error, which `if` reads as false.
+          # On a non-integer, `-gt` errors, and `if` reads that as false.
           if ! [[ "$total" =~ ^[0-9]+$ ]]; then
             echo "::error::could not read the PR's commit count; holding."
             exit 1
@@ -167,8 +147,7 @@ jobs:
             exit 0
           fi
           git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
-          # A push between the reads above changes one of these, and what was inspected is
-          # then not the head that would be approved.
+          # These differ when a push lands between the reads.
           fetched=$(git rev-parse --verify 'refs/remotes/pr/head^{commit}')
           listed=$(printf '%s\n' "$rows" | awk -F'|' 'NF { sha = $4 } END { print sha }')
           if [ "$fetched" != "$head" ] || [ "$listed" != "$head" ]; then
@@ -221,23 +200,18 @@ jobs:
               rejected=$((rejected + 1))
             fi
           done <<< "$rows"
-          # Only a push carries a pusher. An `opened` run has no earlier head: its
-          # commits are the ones Dependabot opened the pull request with.
+          # An `opened` run has no pusher, only the commits Dependabot opened with.
           if [ "$EVENT_ACTION" = synchronize ] && [ "$SENDER" != "$AUTHOR" ] &&
              ! admin "$SENDER"; then
             if ! [[ "$BEFORE" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
                ! [[ "$AFTER" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
                ! git merge-base --is-ancestor "$BEFORE" "$AFTER" 2>/dev/null; then
-              # A rewrite by a pusher who may not add plain commits cannot be checked
-              # commit by commit against what it replaced.
+              # A rewrite cannot be checked against what it replaced.
               echo "::warning::${SENDER} rewrote the branch; holding."
               rejected=$((rejected + 1))
             else
-              # The commits this push added that the default branch, checked out here, does
-              # not already have: a catch-up brings main's own commits in, and those are
-              # not the pusher's. Every other commit, on any parent's side, is checked.
-              # An assignment, so a failed listing fails the step instead of reading as
-              # no commits.
+              # `^HEAD` leaves out the default branch's commits, which a catch-up brings in
+              # but did not write. Assigned, so a failed listing fails the step.
               pushed=$(git rev-list --parents "$AFTER" "^${BEFORE}" '^HEAD')
               while read -r sha parents; do
                 [ -z "$sha" ] && continue
@@ -270,8 +244,6 @@ jobs:
               echo "should_merge=true" >>"$GITHUB_OUTPUT"
               ;;
             version-update:semver-major)
-              # CI exercises only code a pull request runs, so a major used only by a
-              # workflow that no pull request starts merges untested.
               echo "::notice::${ECOSYSTEM:-unknown} major; eligible on green CI."
               echo "should_merge=true" >>"$GITHUB_OUTPUT"
               ;;
@@ -281,10 +253,7 @@ jobs:
               ;;
           esac
 
-      # Arm only while a ruleset requires the context CI's ci-complete job reports, so a
-      # renamed job or a context dropped from the ruleset holds bot pull requests rather
-      # than letting them merge without CI. tests/test_bot_automerge.py pins CONTEXT to
-      # ci.yml.
+      # Auto-merge waits only for required checks.
       - name: Check that the base branch requires CI
         id: gate
         if: steps.eligible.outputs.should_merge == 'true'
@@ -304,8 +273,8 @@ jobs:
               "auto-merge would not wait for CI; leaving this PR for a human."
           fi
 
-      # Re-read the label: one applied during this run is not in the event payload, and the
-      # disarm run may already have finished.
+      # A label applied during this run is not in the payload, and its disarm run may
+      # have finished already.
       - name: Re-check the kill switch, then approve and arm
         if: >-
           steps.eligible.outputs.should_merge == 'true' &&
@@ -315,7 +284,7 @@ jobs:
           ARM_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
           VERIFIED_HEAD: ${{ steps.provenance.outputs.head }}
         run: |
-          # Read into a variable under `set -e`, so a failed query is not read as "no label".
+          # Assigned under `set -e`, so a failed query does not read as no label.
           set -euo pipefail
           if ! [[ "$VERIFIED_HEAD" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
             echo "::error::no verified head commit to approve; not arming."
@@ -327,16 +296,10 @@ jobs:
             echo "::warning::do not auto-merge applied since this run started; not arming."
             exit 0
           fi
-          # Approve and arm in one step: the disarm workflow does not dismiss reviews, so an
-          # approval on a pull request left unarmed would stand.
-          #
-          # Approve as github-actions, never as the App: where the base branch requires
-          # approval of the most recent push, the last pusher's approval does not count,
-          # and a catch-up that merges main into the branch would push as the App.
-          #
-          # Both act on the commit the provenance step inspected: the approval names it,
-          # so an approval of a commit pushed since is stale, and arming refuses a head
-          # that has moved on from it.
+          # Approves and arms in one step, since the disarm workflow leaves an approval in
+          # place. The approval is github-actions', not the App's: a catch-up pushes as
+          # the App, and a ruleset can discount the last pusher's approval. Both name the
+          # verified head, so a later push leaves the approval stale and arming refused.
           decision=$(gh pr view "$PR_NUMBER" --json reviewDecision --jq .reviewDecision)
           if [ "$decision" = "APPROVED" ]; then
             echo "::notice::Already approved."
@@ -348,11 +311,9 @@ jobs:
           GH_TOKEN="$ARM_TOKEN" gh pr merge --auto --squash \
             --match-head-commit "$VERIFIED_HEAD" "$PR_NUMBER"
 
-      # Fails closed. A run that did not trust the head, including one that errored before
-      # reaching a verdict, or one that found CI no longer required, turns off any
-      # auto-merge an earlier run armed, so an approval given later cannot merge commits
-      # no run vouched for. A hold for eligibility alone leaves it: a person may have armed
-      # a held update on purpose.
+      # Turns off what an earlier run armed when this run errored, did not trust the head,
+      # or found CI not required. A hold for eligibility leaves it: a person may have armed
+      # the update.
       - name: Disarm auto-merge unless this run vouched for the head
         if: >-
           always() &&
