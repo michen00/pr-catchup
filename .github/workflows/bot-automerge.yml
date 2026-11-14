@@ -1,0 +1,331 @@
+---
+name: Bot auto-merge
+
+# Approves eligible Dependabot pull requests and arms squash auto-merge on them.
+# Auto-merge waits for required checks, so nothing here polls them.
+#
+# Only events that bring commits trigger it, since a label change or a reopen has no
+# pusher to check. Re-arming after either takes a push, such as `@dependabot rebase`.
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bot-automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bot-automerge:
+    # The author, not `github.actor`: a catch-up push makes its pusher the actor.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'do not auto-merge')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      # Auto-merge completes as whoever armed it, and a merge as `GITHUB_TOKEN` triggers
+      # no workflows, hence the App. Dependabot's runs read only Dependabot secrets.
+      - name: Detect App credentials
+        id: creds
+        env:
+          APP_CLIENT_ID_VALUE: ${{ vars.APP_CLIENT_ID }}
+          APP_KEY_VALUE: ${{ secrets.APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$APP_CLIENT_ID_VALUE" ] && [ -n "$APP_KEY_VALUE" ]; then
+            echo "available=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "available=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::No App credential on this run; arming under the default" \
+                 "token. The merge will fire no downstream push or closed event."
+          fi
+
+      - name: Mint an App token, if one is configured
+        id: app-token
+        if: steps.creds.outputs.available == 'true'
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # `continue-on-error` hides a failed mint.
+      - name: Report a mint that failed
+        if: >-
+          steps.creds.outputs.available == 'true' &&
+          (steps.app-token.outcome != 'success' || steps.app-token.outputs.token == '')
+        run: |
+          echo "::warning::App credentials are set but minting failed; falling back to" \
+               "the default token. Auto-merge still works; downstream triggers will not."
+
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Report metadata that cannot be gated on
+        if: ${{ !steps.meta.outputs.update-type }}
+        env:
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          echo "::notice::No update-type for ${ECOSYSTEM:-unknown}; leaving this for a human."
+
+      # Never the head, so nothing from the pull request runs. The next step fetches the
+      # head's commits as objects only.
+      - name: Check out the default branch's history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify every commit was created by GitHub
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          EVENT_ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          # An author login comes from an email anyone can set, so the head is trusted
+          # only when GitHub created every commit, and:
+          # - a non-merge commit is by the pull request's author;
+          # - a merge is a clean merge of two parents or an admin's, since GitHub also
+          #   signs a conflict resolved by hand;
+          # - on a push by anyone but the author or an admin, every commit it added is a
+          #   clean merge of two parents, since GitHub also signs whatever an App or
+          #   `GITHUB_TOKEN` creates through its API.
+          # Every check reads the one head commit that a trusted verdict names in `head`.
+          # Fails closed: a failed query or fetch leaves `trusted` unset.
+          set -euo pipefail
+          head=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+          if ! [[ "$head" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+            echo "::error::could not read the PR's head commit; holding."
+            exit 1
+          fi
+          jq_rows='.[] | [
+            (if (.commit.verification.verified == true)
+                and (.commit.verification.reason == "valid")
+                and ((.committer.login // "") == "web-flow")
+                and ((.commit.verification.payload // "") | split("\n")
+                     | any(startswith("committer GitHub <noreply@github.com>")))
+             then "github" else "elsewhere" end),
+            (if (.parents | length) >= 2 then "merge" else "plain" end),
+            (.author.login // "<none>"),
+            .sha,
+            ([.parents[].sha] | join(" "))
+          ] | join("|")'
+          # The commits endpoint stops at 250 without an error.
+          total=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq '.commits')
+          # On a non-integer, `-gt` errors, and `if` reads that as false.
+          if ! [[ "$total" =~ ^[0-9]+$ ]]; then
+            echo "::error::could not read the PR's commit count; holding."
+            exit 1
+          fi
+          if [ "$total" -gt 250 ]; then
+            echo "::warning::${total} commits exceeds the 250 this API returns; holding."
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rows=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/commits" --paginate --jq "$jq_rows")
+          seen=$(printf '%s\n' "$rows" | grep -c . || true)
+          if [ "$seen" -ne "$total" ]; then
+            echo "::warning::inspected ${seen} of ${total} commits; holding."
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "+refs/pull/${PR_NUMBER}/head:refs/remotes/pr/head"
+          # These differ when a push lands between the reads.
+          fetched=$(git rev-parse --verify 'refs/remotes/pr/head^{commit}')
+          listed=$(printf '%s\n' "$rows" | awk -F'|' 'NF { sha = $4 } END { print sha }')
+          if [ "$fetched" != "$head" ] || [ "$listed" != "$head" ]; then
+            echo "::warning::the head moved while it was being inspected; holding."
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Succeeds for a commit with exactly two parents whose tree is their clean merge.
+          mechanical() {
+            local sha=$1 first second extra clean
+            read -r first second extra <<< "$2"
+            if [ -z "$second" ] || [ -n "$extra" ]; then
+              return 1
+            fi
+            clean=$(git merge-tree --write-tree --no-messages "$first" "$second") || return 1
+            [ "$clean" = "$(git rev-parse --verify "${sha}^{tree}")" ]
+          }
+          # Succeeds if the repository reports `admin` for the login, asked once per login.
+          admins=' '
+          others=' '
+          admin() {
+            local login=$1 permission
+            if [ -z "$login" ] || [ "$login" = "<none>" ]; then
+              return 1
+            fi
+            case $admins in *" $login "*) return 0 ;; esac
+            case $others in *" $login "*) return 1 ;; esac
+            permission=$(gh api "repos/${GH_REPO}/collaborators/${login}/permission" \
+              --jq .permission) || permission=unknown
+            if [ "$permission" = admin ]; then
+              admins="${admins}${login} "
+              return 0
+            fi
+            others="${others}${login} "
+            return 1
+          }
+          rejected=0
+          while IFS='|' read -r origin kind commit_author sha parents; do
+            [ -z "$origin" ] && continue
+            if [ "$origin" != "github" ]; then
+              echo "::warning::a commit was not created by GitHub; holding."
+              rejected=$((rejected + 1))
+            elif [ "$kind" != "merge" ] && [ "$commit_author" != "$AUTHOR" ]; then
+              echo "::warning::non-merge commit authored by ${commit_author}; holding."
+              rejected=$((rejected + 1))
+            elif [ "$kind" = "merge" ] && ! mechanical "$sha" "$parents" &&
+                 ! admin "$commit_author"; then
+              echo "::warning::merge ${sha} by ${commit_author} is neither a clean merge" \
+                   "of two parents nor an admin's; holding."
+              rejected=$((rejected + 1))
+            fi
+          done <<< "$rows"
+          # An `opened` run has no pusher, only the commits Dependabot opened with.
+          if [ "$EVENT_ACTION" = synchronize ] && [ "$SENDER" != "$AUTHOR" ] &&
+             ! admin "$SENDER"; then
+            if ! [[ "$BEFORE" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
+               ! [[ "$AFTER" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] ||
+               ! git merge-base --is-ancestor "$BEFORE" "$AFTER" 2>/dev/null; then
+              # A rewrite cannot be checked against what it replaced.
+              echo "::warning::${SENDER} rewrote the branch; holding."
+              rejected=$((rejected + 1))
+            else
+              # `^HEAD` leaves out the default branch's commits, which a catch-up brings in
+              # but did not write. Assigned, so a failed listing fails the step.
+              pushed=$(git rev-list --parents "$AFTER" "^${BEFORE}" '^HEAD')
+              while read -r sha parents; do
+                [ -z "$sha" ] && continue
+                if ! mechanical "$sha" "$parents"; then
+                  echo "::warning::${SENDER} pushed ${sha}, which is not a clean merge of" \
+                       "two parents; holding."
+                  rejected=$((rejected + 1))
+                fi
+              done <<< "$pushed"
+            fi
+          fi
+          if [ "$rejected" -ne 0 ]; then
+            echo "trusted=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "trusted=true" >>"$GITHUB_OUTPUT"
+            echo "head=${head}" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide eligibility
+        id: eligible
+        if: steps.provenance.outputs.trusted == 'true'
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          set -euo pipefail
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor)
+              echo "::notice::Dependabot ${UPDATE_TYPE}; eligible."
+              echo "should_merge=true" >>"$GITHUB_OUTPUT"
+              ;;
+            version-update:semver-major)
+              echo "::notice::${ECOSYSTEM:-unknown} major; eligible on green CI."
+              echo "should_merge=true" >>"$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::warning::Holding ${UPDATE_TYPE:-unknown update type} for a human."
+              echo "should_merge=false" >>"$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      # Auto-merge waits only for required checks.
+      - name: Check that the base branch requires CI
+        id: gate
+        if: steps.eligible.outputs.should_merge == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          CONTEXT: CI complete
+        run: |
+          set -euo pipefail
+          required="$(gh api "repos/${GH_REPO}/rules/branches/${BASE_REF}?per_page=100" \
+            --jq '[.[] | select(.type == "required_status_checks")
+              | .parameters.required_status_checks[].context]' \
+            | jq --arg c "$CONTEXT" 'index($c) != null')"
+          echo "required=${required}" >>"$GITHUB_OUTPUT"
+          if [ "$required" != true ]; then
+            echo "::notice::No ruleset on ${BASE_REF} requires '${CONTEXT}', so" \
+              "auto-merge would not wait for CI; leaving this PR for a human."
+          fi
+
+      # A label applied during this run is not in the payload, and its disarm run may
+      # have finished already.
+      - name: Re-check the kill switch, then approve and arm
+        if: >-
+          steps.eligible.outputs.should_merge == 'true' &&
+          steps.gate.outputs.required == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARM_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          VERIFIED_HEAD: ${{ steps.provenance.outputs.head }}
+        run: |
+          # Assigned under `set -e`, so a failed query does not read as no label.
+          set -euo pipefail
+          if ! [[ "$VERIFIED_HEAD" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+            echo "::error::no verified head commit to approve; not arming."
+            exit 1
+          fi
+          labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          # Case-insensitive, as GitHub compares label names.
+          if grep -qixF 'do not auto-merge' <<< "$labels"; then
+            echo "::warning::do not auto-merge applied since this run started; not arming."
+            exit 0
+          fi
+          # Approves and arms in one step, since the disarm workflow leaves an approval in
+          # place. The approval is github-actions', not the App's: a catch-up pushes as
+          # the App, and a ruleset can discount the last pusher's approval. Both name the
+          # verified head, so a later push leaves the approval stale and arming refused.
+          decision=$(gh pr view "$PR_NUMBER" --json reviewDecision --jq .reviewDecision)
+          if [ "$decision" = "APPROVED" ]; then
+            echo "::notice::Already approved."
+          else
+            gh api -X POST "repos/${GH_REPO}/pulls/${PR_NUMBER}/reviews" \
+              -f event=APPROVE -f commit_id="$VERIFIED_HEAD" >/dev/null ||
+              echo "::warning::approval refused; auto-merge will wait for a reviewer."
+          fi
+          GH_TOKEN="$ARM_TOKEN" gh pr merge --auto --squash \
+            --match-head-commit "$VERIFIED_HEAD" "$PR_NUMBER"
+
+      # Turns off what an earlier run armed when this run errored, did not trust the head,
+      # or found CI not required. A hold for eligibility leaves it: a person may have armed
+      # the update.
+      - name: Disarm auto-merge unless this run vouched for the head
+        if: >-
+          always() &&
+          (steps.provenance.outputs.trusted != 'true' ||
+           steps.gate.outputs.required == 'false')
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+          armed=$(gh pr view "$PR_NUMBER" --json autoMergeRequest \
+            --jq '.autoMergeRequest != null')
+          if [ "$armed" = true ]; then
+            gh pr merge --disable-auto "$PR_NUMBER"
+            echo "::warning::auto-merge disarmed: this run did not vouch for the head."
+          fi

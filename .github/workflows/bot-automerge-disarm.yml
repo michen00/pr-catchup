@@ -1,0 +1,59 @@
+---
+name: Bot auto-merge disarm
+
+# Turns off auto-merge when a pull request is labeled `do not auto-merge`, since the
+# label alone does not stop an armed merge. No branch, author or fork guard: disarming
+# an unarmed pull request is a no-op.
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  # Disabling auto-merge needs contents: write, although nothing here writes a ref.
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # Per label and never canceled, so another label event cannot cancel a disarm.
+  group: bot-automerge-disarm-${{ github.event.pull_request.number }}-${{ github.event.label.name }}
+  cancel-in-progress: false
+
+jobs:
+  disarm:
+    if: github.event.label.name == 'do not auto-merge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      # Fails closed: anything short of a confirmed "off" disables again.
+      - name: Disarm auto-merge
+        run: |
+          state=$(gh pr view "$PR_NUMBER" --json state --jq .state || echo "")
+          if [ "$state" = "CLOSED" ] || [ "$state" = "MERGED" ]; then
+            echo "::notice::PR #${PR_NUMBER} is ${state}; nothing to disarm."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            armed=$(gh pr view "$PR_NUMBER" --json autoMergeRequest \
+              --jq '.autoMergeRequest != null') || armed=""
+            if [ "$armed" = "false" ]; then
+              echo "::notice::Auto-merge is off on PR #${PR_NUMBER}."
+              exit 0
+            fi
+            gh pr merge --disable-auto "$PR_NUMBER" || true
+            echo "::warning::attempt ${attempt}: auto-merge not yet confirmed off on #${PR_NUMBER}."
+            sleep 5
+          done
+          # The last attempt's disable may have worked; read once more before failing.
+          if [ "$(gh pr view "$PR_NUMBER" --json autoMergeRequest \
+              --jq '.autoMergeRequest != null')" = "false" ]; then
+            echo "::notice::Auto-merge is off on PR #${PR_NUMBER}."
+            exit 0
+          fi
+          echo "::error::Could not confirm auto-merge is off on #${PR_NUMBER}. Disable it by hand:"
+          echo "::error::gh pr merge --disable-auto ${PR_NUMBER} --repo ${GH_REPO}"
+          exit 1
