@@ -26,7 +26,7 @@ BASH = os.environ.get('PR_CATCHUP_TEST_BASH', 'bash')
 
 # Variables the scripts, the runner, or bash itself read, which each test sets or
 # omits on purpose; a CI runner's own GITHUB_OUTPUT would otherwise receive output.
-_ISOLATED_PREFIXES = ('GITHUB_', 'RUNNER_', 'FAKE_', 'PR_CATCHUP_', 'GH_')
+_ISOLATED_PREFIXES = 'GITHUB_', 'RUNNER_', 'FAKE_', 'PR_CATCHUP_', 'GH_'
 _ISOLATED_NAMES = frozenset(
     {
         'APP_TOKEN',
