@@ -10,6 +10,8 @@ ci:
     for more information, see https://pre-commit.ci
   # Dependabot bumps hooks; quarterly is as close to off as pre-commit.ci allows.
   autoupdate_schedule: quarterly
+  # tombi needs the network for its schema catalog; CI's pre-commit job runs it.
+  skip: [tombi-format, tombi-lint]
 
 default_install_hook_types:
   - commit-msg
@@ -60,6 +62,11 @@ repos:
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
+  - repo: https://github.com/rbubley/mirrors-prettier
+    rev: v3.9.10
+    hooks:
+      - id: prettier
+        types_or: [css, html, javascript, json, markdown, scss, ts, yaml]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.4
     hooks:
@@ -70,6 +77,10 @@ repos:
     rev: v3.14.1-1
     hooks:
       - id: shfmt
+  - repo: https://github.com/tombi-toml/tombi-pre-commit
+    rev: v1.11.2
+    hooks:
+      - id: tombi-format
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.50.0
     hooks:
@@ -84,6 +95,10 @@ repos:
       - id: check-toml
       - id: check-yaml
       - id: debug-statements
+  - repo: https://github.com/tombi-toml/tombi-pre-commit
+    rev: v1.11.2
+    hooks:
+      - id: tombi-lint
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.38.0
     hooks:
