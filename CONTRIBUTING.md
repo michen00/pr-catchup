@@ -30,6 +30,8 @@ uv run --locked pre-commit run --all-files
 
 CI runs both on every pull request that targets `main`. The hooks include shfmt and shellcheck for the scripts, actionlint for the workflows, ruff and ty for the tests, and markdownlint, yamllint, typos, and codespell for everything else.
 
+The files that `.github/workflows/sync-template.yml` lists come from [michen00/template](https://github.com/michen00/template). Change them there: a change made here is undone by the next weekly sync pull request.
+
 ## Changing the scripts
 
 The tests pin the scripts' behavior: the `gh` calls they make, the state files they write, their exit statuses, and the text of the messages they print. A change to any of these needs the matching test change in the same pull request.
