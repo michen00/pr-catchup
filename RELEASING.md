@@ -35,19 +35,17 @@ Before the first release there is no tag to describe; read the whole log instead
 
    Naming the single ref keeps any other local tag off the remote, which `git push --tags` or `--follow-tags` would push.
 
-3. Create the GitHub release from the tag:
+3. Write the release notes and create the GitHub release from the tag:
 
    ```sh
-   gh release create vX.Y.Z --verify-tag --generate-notes --title vX.Y.Z
+   notes=$(mktemp)
+   GITHUB_TOKEN="$(gh auth token)" uv run --locked git-cliff --latest --strip all > "$notes"
+   gh release create vX.Y.Z --verify-tag --title vX.Y.Z --notes-file "$notes"
    ```
 
-   `gh` has no option for a GitHub Marketplace listing. To list the release there, draft it in the web form instead (**Releases**, then **Draft a new release**, then the existing tag) and select **Publish this Action to the GitHub Marketplace**.
+   [`cliff.toml`](cliff.toml) lists features, fixes, performance changes, reverts, and breaking changes since the last release, and leaves out everything else. The notes open with the line callers pin, which names the tag's commit SHA. The token lets git-cliff name each commit's GitHub author; bots are not named. Read the notes before running `gh release create`, and add a sentence at the top when a change needs explaining to callers.
 
-4. Print the commit SHA that callers pin, and put it in the release notes:
-
-   ```sh
-   git rev-parse 'vX.Y.Z^{commit}'
-   ```
+   `gh` has no option for a GitHub Marketplace listing. To list the release there, draft it in the web form instead (**Releases**, then **Draft a new release**, then the existing tag), paste the notes, and select **Publish this Action to the GitHub Marketplace**.
 
 ## How callers pin a release
 
