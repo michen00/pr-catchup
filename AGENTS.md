@@ -17,12 +17,16 @@ Setup needs uv, git, bash, and jq.
 
 ```sh
 uv sync --locked                             # install the locked dev dependencies
-uv run pre-commit install                    # install the commit and commit-message hooks
+hooks_venv="$(git rev-parse --path-format=absolute --git-common-dir)/pre-commit-venv"
+UV_PROJECT_ENVIRONMENT="$hooks_venv" uv sync --locked --no-install-project --only-group dev
+"$hooks_venv/bin/pre-commit" install         # install the commit and commit-message hooks
 uv run --locked pytest                       # run the tests
 uv run --locked pytest -k <pattern>          # run matching tests
 uv run --locked pre-commit run --all-files   # run every hook, as CI does
 uv run --locked pre-commit run shellcheck --all-files   # run one hook
 ```
+
+Every worktree shares the hooks, and each hook runs the interpreter it was installed from, so the hooks get an environment of their own in the common git directory, synced from the `dev` group in `uv.lock`, rather than a worktree's `.venv`, which is deleted with that worktree.
 
 ## Hard rules
 
