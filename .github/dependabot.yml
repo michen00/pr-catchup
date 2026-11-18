@@ -1,34 +1,33 @@
 ---
 version: 2
+# Version updates only: a security update still opens a pull request of its own.
+multi-ecosystem-groups:
+  deps:
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+      include: scope
+# Each entry takes its schedule and commit message from the group above.
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ['*']
+    patterns: ['*']
+    multi-ecosystem-group: deps
     cooldown:
       # GitHub rejects the semver-* keys for this ecosystem, and an invalid key drops
       # the whole entry.
       default-days: 7
   - package-ecosystem: uv
     directory: /
-    schedule:
-      interval: daily
-    groups:
-      uv-major:
-        update-types: [major]
-      uv-minor-patch:
-        update-types: [minor, patch]
+    patterns: ['*']
+    multi-ecosystem-group: deps
     cooldown:
       default-days: 7
   - package-ecosystem: pre-commit
     directory: /
-    schedule:
-      interval: weekly
-    groups:
-      pre-commit:
-        patterns: ['*']
+    patterns: ['*']
+    multi-ecosystem-group: deps
     cooldown:
       default-days: 7
