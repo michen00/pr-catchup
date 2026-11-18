@@ -6,7 +6,7 @@ name: Sync template files
 
 on:
   schedule:
-    - cron: '0 9 * * 1' # Mondays at 09:00 UTC
+    - cron: '17 13 * * 2' # Tuesdays at 13:17 UTC; GitHub delays runs at the top of the hour
   workflow_dispatch:
 
 permissions: {}
