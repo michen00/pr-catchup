@@ -19,7 +19,7 @@ UV_PROJECT_ENVIRONMENT="$hooks_venv" uv sync --locked --no-install-project --onl
 "$hooks_venv/bin/pre-commit" install
 ```
 
-`pre-commit install` sets up the hooks that check each commit and its message. Every worktree shares those hooks, and each hook runs the interpreter it was installed from, so they get an environment of their own in the common git directory (`.git/pre-commit-venv`, synced from the `dev` group in `uv.lock`) and keep working after the worktree that installed them is removed.
+`pre-commit install` sets up the hooks that check each commit and its message. They run from `.git/pre-commit-venv`, so they keep working after the worktree that installed them is removed.
 
 ## Checks
 

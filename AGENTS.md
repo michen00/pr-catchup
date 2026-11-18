@@ -26,8 +26,6 @@ uv run --locked pre-commit run --all-files   # run every hook, as CI does
 uv run --locked pre-commit run shellcheck --all-files   # run one hook
 ```
 
-Every worktree shares the hooks, and each hook runs the interpreter it was installed from, so the hooks get an environment of their own in the common git directory, synced from the `dev` group in `uv.lock`, rather than a worktree's `.venv`, which is deleted with that worktree.
-
 ## Hard rules
 
 - The repository is public. Never name an organization, a private repository, an issue-tracker key, or a person other than the owner, `michen00`, in a file, commit message, or pull request.
