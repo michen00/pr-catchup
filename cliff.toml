@@ -8,11 +8,11 @@ Pin this release by its commit SHA:
 ```yaml
 - uses: michen00/pr-catchup@{{ commit_id }} # {{ version }}
 ```
-{% for group, group_commits in commits | group_by(attribute="group") %}
+{% for group, group_commits in commits | group_by(attribute='group') %}
 ### {{ group | striptags | trim }}
 {% for commit in group_commits %}
-- {% if commit.breaking %}❗ {% endif %}{{ commit.message | split(pat="\n") | first | trim }}\
-{% if commit.remote.username and commit.remote.username is not containing("[bot]") %} by @{{ commit.remote.username }}{% endif %}
+- {% if commit.breaking %}❗ {% endif %}{{ commit.message | split(pat='\n') | first | trim }}\
+{% if commit.remote.username and commit.remote.username is not containing('[bot]') %} by @{{ commit.remote.username }}{% endif %}
 {%- endfor %}
 {% else %}
 No features or fixes{% if previous.version %} since {{ previous.version }}{% endif %}.
