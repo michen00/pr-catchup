@@ -14,10 +14,12 @@ You need [uv](https://docs.astral.sh/uv/), git, bash, and [jq](https://jqlang.or
 git clone https://github.com/michen00/pr-catchup.git
 cd pr-catchup
 uv sync --locked
-uv run pre-commit install
+hooks_venv="$(git rev-parse --path-format=absolute --git-common-dir)/pre-commit-venv"
+UV_PROJECT_ENVIRONMENT="$hooks_venv" uv sync --locked --no-install-project --only-group dev
+"$hooks_venv/bin/pre-commit" install
 ```
 
-`pre-commit install` sets up the hooks that check each commit and its message.
+`pre-commit install` sets up the hooks that check each commit and its message. They run from `.git/pre-commit-venv`, so they keep working after the worktree that installed them is removed.
 
 ## Checks
 
