@@ -1,0 +1,47 @@
+# https://git-cliff.org/docs/configuration
+# Release notes for one release (RELEASING.md); there is no CHANGELOG.md.
+
+[changelog]
+body = """
+Pin this release by its commit SHA:
+
+```yaml
+- uses: michen00/pr-catchup@{{ commit_id }} # {{ version }}
+```
+{% for group, group_commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in group_commits %}
+- {% if commit.breaking %}❗ {% endif %}{{ commit.message | split(pat="\n") | first | trim }}\
+{% if commit.remote.username and commit.remote.username is not containing("[bot]") %} by @{{ commit.remote.username }}{% endif %}
+{%- endfor %}
+{% else %}
+No features or fixes{% if previous.version %} since {{ previous.version }}{% endif %}.
+{% endfor %}
+**Full changelog**: https://github.com/michen00/pr-catchup/\
+{% if previous.version %}compare/{{ previous.version }}...{{ version }}{% else %}commits/{{ version }}{% endif %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+commit_preprocessors = [
+  { pattern = '\(#([0-9]+)\)', replace = '([#${1}](https://github.com/michen00/pr-catchup/pull/${1}))' },
+]
+commit_parsers = [
+  { message = '^feat', group = '<!-- 0 -->Features' },
+  { message = '^fix', group = '<!-- 1 -->Fixes' },
+  { message = '^perf', group = '<!-- 2 -->Performance' },
+  { message = '^revert', group = '<!-- 3 -->Reverts' },
+  # Left out unless breaking (protect_breaking_commits).
+  { message = '.*', group = '<!-- 4 -->Other changes', skip = true },
+]
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+$'
+topo_order = true
+sort_commits = 'oldest'
+
+[remote.github]
+owner = 'michen00'
+repo = 'pr-catchup'

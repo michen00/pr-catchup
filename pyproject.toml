@@ -1,13 +1,13 @@
 [project]
 name = "pr-catchup"
-# The action is versioned by its release tags; this project only runs its checks.
+# The action is versioned by its release tags; this project holds only its dev tools.
 version = "0.0.0"
 description = "Tests and checks for the pr-catchup composite action"
 requires-python = ">=3.13"
 dependencies = []
 
 [dependency-groups]
-dev = ["pre-commit>=4.0", "pytest>=9.0"]
+dev = ["git-cliff>=2.14", "pre-commit>=4.0", "pytest>=9.0"]
 
 [tool.uv]
 package = false
