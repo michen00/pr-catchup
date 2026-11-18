@@ -9,16 +9,9 @@ multi-ecosystem-groups:
     commit-message:
       prefix: build
       include: scope
-# Each entry takes its schedule and commit message from the group above.
+# The uv and pre-commit entries take their schedule and commit message from the
+# group above.
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    patterns: ['*']
-    multi-ecosystem-group: deps
-    cooldown:
-      # GitHub rejects the semver-* keys for this ecosystem, and an invalid key drops
-      # the whole entry.
-      default-days: 7
   - package-ecosystem: uv
     directory: /
     patterns: ['*']
@@ -30,4 +23,21 @@ updates:
     patterns: ['*']
     multi-ecosystem-group: deps
     cooldown:
+      default-days: 7
+  # Actions run in jobs that hold write scopes, so their updates open a pull
+  # request of their own, which no failing uv or pre-commit update holds.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: build
+      include: scope
+    cooldown:
+      # GitHub rejects the semver-* keys for this ecosystem, and an invalid key drops
+      # the whole entry.
       default-days: 7
