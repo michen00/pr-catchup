@@ -2,6 +2,35 @@
 
 `michen00/pr-catchup` is a composite GitHub Action that merges the base branch into every open pull request that targets it, comes from a branch in the same repository, and does not conflict, so those pull requests stay current without anyone pressing Update branch. You run it from a workflow triggered by each push to the base. Each merge goes through the GitHub API, so GitHub creates and signs the merge commit, with a message you choose. When a merge is made with the workflow's default token, the action approves the runs that commit causes, which GitHub otherwise holds for approval, and a run it cannot clear fails the workflow.
 
+## Contents
+
+- [Why use it](#why-use-it)
+  - [The problem](#the-problem)
+  - [What this action does differently](#what-this-action-does-differently)
+- [Compared with other options](#compared-with-other-options)
+- [Usage](#usage)
+  - [Minimal workflow, without an App](#minimal-workflow-without-an-app)
+  - [Recommended workflow, with a GitHub App token](#recommended-workflow-with-a-github-app-token)
+  - [Why each setting is there](#why-each-setting-is-there)
+- [How a run works](#how-a-run-works)
+- [Inputs](#inputs)
+- [Outputs](#outputs)
+- [When a run fails](#when-a-run-fails)
+  - [A merge was refused](#a-merge-was-refused)
+  - [A run is still held](#a-run-is-still-held)
+  - [Whether a run cleared the hold is unknown](#whether-a-run-cleared-the-hold-is-unknown)
+  - [No `pull_request` run appeared](#no-pull_request-run-appeared)
+  - [The run fails before any merge](#the-run-fails-before-any-merge)
+  - [Messages that do not fail the run](#messages-that-do-not-fail-the-run)
+- [Security](#security)
+  - [What `github-token` approves](#what-github-token-approves)
+  - [Inputs never reach the shell as code](#inputs-never-reach-the-shell-as-code)
+  - [The App key stays out of the action](#the-app-key-stays-out-of-the-action)
+  - [Pin a commit SHA](#pin-a-commit-sha)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Why use it
 
 ### The problem
