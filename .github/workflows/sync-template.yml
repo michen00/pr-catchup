@@ -35,10 +35,12 @@ jobs:
           sources: |
             - source: michen00/template
               default_files:
+                - .editorconfig
                 - .github/release.yml
                 - .markdownlint.yml
                 - .prettierignore
                 - .prettierrc
+                - .yamllint
                 - tombi.toml
           github-token: ${{ github.token }}
           fail-on-error: 'true'
