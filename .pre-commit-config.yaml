@@ -63,12 +63,12 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
   - repo: https://github.com/rbubley/mirrors-prettier
-    rev: v3.9.10
+    rev: v3.10.1
     hooks:
       - id: prettier
         types_or: [css, html, javascript, json, markdown, scss, ts, yaml]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.4
+    rev: v0.17.5
     hooks:
       - id: ruff-check
         args: [--fix, --show-fixes]
@@ -125,7 +125,7 @@ repos:
 
   # static type analysis
   - repo: https://github.com/astral-sh/ty-pre-commit
-    rev: v0.0.100
+    rev: v0.0.104
     hooks:
       - id: ty
         # The hook syncs uv.lock into the project environment and checks against it;
